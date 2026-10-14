@@ -92,6 +92,23 @@ def current_profile() -> StudentProfile:
         accessibility_notes=st.session_state["accessibility_notes"],
     )
 
+def update_current_profile() -> None:
+    st.session_state["display_name"] = st.session_state["display_name_input"]
+    st.session_state["grade_band"] = st.session_state["grade_band_input"]
+    st.session_state["school_class"] = st.session_state["school_class_input"]
+    st.session_state["preferred_feedback"] = st.session_state["preferred_feedback_input"]
+    st.session_state["accessibility_notes"] = st.session_state["accessibility_notes_input"]
+    for topic in TOPICS:
+        st.session_state[f"level_{topic}"] = st.session_state[f"level_{topic}_input"]
+
+
+def update_topic_level(topic: str) -> None:
+    st.session_state[f"level_{topic}"] = st.session_state[f"mastery_level_{topic}_input"]
+
+
+def update_theme() -> None:
+    st.session_state["theme"] = st.session_state["theme_input"]
+
 
 def inject_css() -> None:
     dark = st.session_state["theme"] == "Dark"
@@ -438,8 +455,7 @@ def render_review(report: dict[str, Any], profile: StudentProfile) -> None:
                 <div class="mm-detail-grid">
                     <div class="mm-detail"><div class="mm-label">Expected step</div><div class="mm-detail-value">{esc(evaluation['expected_step'])}</div></div>
                     <div class="mm-detail"><div class="mm-label">Concept</div><div class="mm-detail-value">{esc(evaluation['concept'].replace('_', ' '))}</div></div>
-                </div>
-            """
+                </div>"""
         st.markdown(
             f"""
             <div class="mm-review-card{css}">
@@ -449,8 +465,7 @@ def render_review(report: dict[str, Any], profile: StudentProfile) -> None:
                     <span class="mm-label">{esc(evaluation['error_type'].replace('_', ' '))}</span>
                     <span class="mm-label">Confidence {100 * float(evaluation['confidence']):.0f}%</span>
                 </div>
-                <div class="mm-submitted">{esc(evaluation['student_step'])}</div>
-                {detail}
+                <div class="mm-submitted">{esc(evaluation['student_step'])}</div>{detail}
                 <div class="mm-mentor-note"><strong>{esc(feedback['style'].replace('_', ' ').title())}:</strong> {esc(feedback['feedback'])}<br><span style="color:var(--mm-muted)">{esc(evaluation['explanation'])}</span></div>
             </div>
             """,
@@ -458,16 +473,19 @@ def render_review(report: dict[str, Any], profile: StudentProfile) -> None:
         )
 
     recommendation = report["recommended_problem"]
-    st.markdown(
-        f"""
-        <div class="mm-problem">
-            <div class="mm-meta">Recommended next problem</div>
-            <div class="mm-problem-text">{esc(recommendation['prompt'])}</div>
-            <div class="mm-meta">{esc(recommendation['problem_id'])} / {esc(recommendation['topic'])} / Difficulty {recommendation['difficulty']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        recommendation_text, recommendation_button = st.columns([3, 1], vertical_alignment="center")
+        with recommendation_text:
+            st.markdown(
+                f"""<div class="mm-meta">Recommended next problem</div>
+<div class="mm-problem-text">{esc(recommendation['prompt'])}</div>
+<div class="mm-meta">{esc(recommendation['problem_id'])} / {esc(recommendation['topic'])} / Difficulty {recommendation['difficulty']}</div>""",
+                unsafe_allow_html=True,
+            )
+        with recommendation_button:
+            if st.button("Move on to next problem", type="primary", use_container_width=True):
+                st.session_state["_problem_request"] = recommendation["problem_id"]
+                st.rerun()
 
     snapshot = pd.DataFrame(report.get("weakness_summary", []))
     if not snapshot.empty:
@@ -663,11 +681,14 @@ def render_mastery() -> None:
                 st.markdown(f"### {topic}")
                 st.caption(f"Mastery {mastery:.2f} | Attempted steps {attempted_steps} | Error rate {100 * error_rate:.0f}%")
             with level_col:
+                st.session_state[f"mastery_level_{topic}_input"] = st.session_state[f"level_{topic}"]
                 st.selectbox(
                     "Starting level",
                     LEVEL_OPTIONS,
-                    key=f"level_{topic}",
+                    key=f"mastery_level_{topic}_input",
                     format_func=lambda value: value.title(),
+                    on_change=update_topic_level,
+                    args=(topic,),
                 )
             st.progress(max(0.0, min(1.0, mastery)))
             subset = summary[summary["topic"] == topic] if not summary.empty else pd.DataFrame()
@@ -801,35 +822,45 @@ def render_settings() -> None:
     )
     st.markdown("## Display")
     st.caption("Choose the brightness that feels best for studying. The attached UI uses dark mode by default.")
-    st.radio("Appearance", ["Dark", "Light"], horizontal=True, key="theme")
+    st.session_state.setdefault("theme_input", st.session_state["theme"])
+    st.radio("Appearance", ["Dark", "Light"], horizontal=True, key="theme_input", on_change=update_theme)
 
     st.markdown("## Learner profile")
+    st.session_state.setdefault("display_name_input", st.session_state["display_name"])
+    st.session_state.setdefault("grade_band_input", st.session_state["grade_band"])
+    st.session_state.setdefault("school_class_input", st.session_state["school_class"])
+    st.session_state.setdefault("preferred_feedback_input", st.session_state["preferred_feedback"])
+    st.session_state.setdefault("accessibility_notes_input", st.session_state["accessibility_notes"])
+    for topic in TOPICS:
+        st.session_state.setdefault(f"level_{topic}_input", st.session_state[f"level_{topic}"])
     with st.form("profile_form"):
         p1, p2 = st.columns(2)
-        p1.text_input("Display name", key="display_name")
+        p1.text_input("Display name", key="display_name_input")
         p2.selectbox(
             "Grade band",
             ["Grades 5-7", "Grades 7-10", "Grades 9-12", "Grades 9-12 / College", "College / AP", "College"],
-            key="grade_band",
+            key="grade_band_input",
         )
-        p1.text_input("School / class (optional)", key="school_class")
+        p1.text_input("School / class (optional)", key="school_class_input")
         p2.selectbox(
             "Preferred feedback style",
             FEEDBACK_STYLES,
-            key="preferred_feedback",
+            key="preferred_feedback_input",
             format_func=lambda value: value.replace("_", " ").title(),
         )
         st.text_area(
             "Accessibility or learning notes (optional)",
-            key="accessibility_notes",
+            key="accessibility_notes_input",
             help="Examples: shorter explanations, more worked examples, larger chunks, or extra notation reminders.",
         )
         st.markdown("### Current topic level")
         level_columns = st.columns(3)
         for index, topic in enumerate(TOPICS):
             with level_columns[index % 3]:
-                st.selectbox(topic, LEVEL_OPTIONS, key=f"level_{topic}", format_func=lambda value: value.title())
-        saved = st.form_submit_button("Save learner settings", type="primary")
+                st.selectbox(topic, LEVEL_OPTIONS, key=f"level_{topic}_input", format_func=lambda value: value.title())
+        saved = st.form_submit_button(
+            "Save learner settings", type="primary", on_click=update_current_profile,
+        )
         if saved:
             st.success("Learner settings saved for this browser session.")
 
